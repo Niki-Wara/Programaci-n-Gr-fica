@@ -479,10 +479,16 @@ function main(){
   if(!gl){ alert('WebGL2 no soportado'); return; }
   const vs=crearShader(gl,gl.VERTEX_SHADER,document.getElementById('vs').textContent);
   const fs=crearShader(gl,gl.FRAGMENT_SHADER,document.getElementById('fs').textContent);
-  programa=gl.createProgram(); gl.attachShader(programa,vs); gl.attachShader(programa,fs); gl.linkProgram(programa); gl.useProgram(programa);
+  programa=gl.createProgram(); 
+  gl.attachShader(programa,vs); 
+  gl.attachShader(programa,fs); 
+  gl.linkProgram(programa); 
+  gl.useProgram(programa);
 
-  uProjLoc=gl.getUniformLocation(programa,'uProj'); uViewLoc=gl.getUniformLocation(programa,'uView'); 
-  uModelLoc=gl.getUniformLocation(programa,'uModel'); uTexLoc=gl.getUniformLocation(programa,'uTexture');
+  uProjLoc=gl.getUniformLocation(programa,'uProj'); 
+  uViewLoc=gl.getUniformLocation(programa,'uView'); 
+  uModelLoc=gl.getUniformLocation(programa,'uModel'); 
+  uTexLoc=gl.getUniformLocation(programa,'uTexture');
 
   const proj=ortho(0,COLUMNAS,FILAS,0,-1,1);
   gl.viewport(0,0,canvas.width,canvas.height);
