@@ -20,15 +20,15 @@
 <script id="vs" type="x-shader/x-vertex">
 #version 300 es
 precision mediump float;
-layout(location=0) in vec2 aPos;
+layout(location=0) in vec2 aVertices;
 layout(location=1) in vec2 aUV;
-uniform mat4 uProj;
-uniform mat4 uView;
-uniform mat4 uModel;
+uniform mat4 uMatrizProyeccion;
+uniform mat4 uMatrizVista;
+uniform mat4 uMatrizModelo;
 out vec2 vUV;
 void main() {
   vUV = aUV;
-  gl_Position = uProj * uView * uModel * vec4(aPos, 0.0, 1.0);
+  gl_Position = uMatrizProyeccion * uMatrizVista * uMatrizModelo * vec4(aVertices, 0.0, 1.0);
 }
 </script>
 
@@ -177,7 +177,7 @@ class SpriteSheet {
         gl.bindBuffer(gl.ARRAY_BUFFER, null);
     }
 
-    dibujarRegion(x, y, w, h, xpx, ypx, wpx, hpx, uModelLoc, uTexLoc) {
+    dibujarRegion(x, y, w, h, xpx, ypx, wpx, hpx, uMatrizModeloLoc, uTexLoc) {
         const gl = this.gl;
 
         const u0 = xpx / this.sheetW;
@@ -199,7 +199,7 @@ class SpriteSheet {
         const modelo = identidad();      // Crear identidad
         trasladar(modelo, x, y);         // Traslación
         escalar(modelo, w, h);           // Escalado
-        gl.uniformMatrix4fv(uModelLoc, false, modelo);
+        gl.uniformMatrix4fv(uMatrizModeloLoc, false, modelo);
 
         // Dibujar
         gl.bindVertexArray(this.vao);
@@ -212,7 +212,7 @@ class SpriteSheet {
    ENTIDADES
 ------------------- */
 // Variables globales
-let gl, canvas, programa, uProjLoc, uViewLoc, uModelLoc, uTexLoc, sheet;
+let gl, canvas, programa, uMatrizProyeccionLoc, uMatrizVistaLoc, uMatrizModeloLoc, uTexLoc, sheet;
 let muros = [], pastillas = [], fantasmas = [], pacman, fruta;
 
 // -------------------
@@ -236,7 +236,7 @@ class Muro {
             SPRITE_PARED.fila * ALTO_SPRITE,
             ANCHO_SPRITE,
             ALTO_SPRITE,
-            uModelLoc,
+            uMatrizModeloLoc,
             uTexLoc
         );
     }
@@ -265,7 +265,7 @@ class Pastilla {
                 SPRITE_PASTILLA.fila * ALTO_SPRITE,
                 ANCHO_SPRITE,
                 ALTO_SPRITE,
-                uModelLoc,
+                uMatrizModeloLoc,
                 uTexLoc
             );
         }
@@ -295,7 +295,7 @@ class Fruta {
                 SPRITE_FRUTA.fila * ALTO_SPRITE,
                 ANCHO_SPRITE,
                 ALTO_SPRITE,
-                uModelLoc,
+                uMatrizModeloLoc,
                 uTexLoc
             );
         }
@@ -328,7 +328,7 @@ class Pac {
             SPRITE_PAC.fila * ALTO_SPRITE,
             ANCHO_SPRITE,
             ALTO_SPRITE,
-            uModelLoc,
+            uMatrizModeloLoc,
             uTexLoc
         );
     }
@@ -377,7 +377,7 @@ class Fantasma {
             this.sprite.fila * ALTO_SPRITE,
             ANCHO_SPRITE,
             ALTO_SPRITE,
-            uModelLoc,
+            uMatrizModeloLoc,
             uTexLoc
         );
     }
@@ -485,16 +485,16 @@ function main(){
   gl.linkProgram(programa); 
   gl.useProgram(programa);
 
-  uProjLoc=gl.getUniformLocation(programa,'uProj'); 
-  uViewLoc=gl.getUniformLocation(programa,'uView'); 
-  uModelLoc=gl.getUniformLocation(programa,'uModel'); 
+  uMatrizProyeccionLoc=gl.getUniformLocation(programa,'uMatrizProyeccion'); 
+  uMatrizVistaLoc=gl.getUniformLocation(programa,'uMatrizVista'); 
+  uMatrizModeloLoc=gl.getUniformLocation(programa,'uMatrizModelo'); 
   uTexLoc=gl.getUniformLocation(programa,'uTexture');
 
   const proj=ortho(0,COLUMNAS,FILAS,0,-1,1);
   gl.viewport(0,0,canvas.width,canvas.height);
   gl.clearColor(0,0,0,1);
-  gl.uniformMatrix4fv(uProjLoc,false,proj);
-  gl.uniformMatrix4fv(uViewLoc,false,identidad());
+  gl.uniformMatrix4fv(uMatrizProyeccionLoc,false,proj);
+  gl.uniformMatrix4fv(uMatrizVistaLoc,false,identidad());
 
   sheet=new SpriteSheet(gl,'imag/spritesheet_nopink.png',ANCHO_SHEET,ALTO_SHEET);
   crearNivel();
