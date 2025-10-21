@@ -1,0 +1,559 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Pac-Man WebGL</title>
+<style>
+  body { background: #000; color: #fff; display:flex; flex-direction:column; align-items:center; font-family: sans-serif; }
+  canvas { border:2px solid #0ff; margin:12px; }
+  h1 { margin:8px 0; }
+  #info { color:#ccc; font-size:14px; }
+</style>
+</head>
+<body>
+  <h1>Pac-Man</h1>
+  <div id="info">Come a los 4 fantasmas y las frutas naranjas</div>
+  <canvas id="glcanvas" width="800" height="600"></canvas>
+  <button id="reiniciar">Reiniciar</button>
+
+<script id="vs" type="x-shader/x-vertex">
+#version 300 es
+precision mediump float;
+layout(location=0) in vec2 aPos;
+layout(location=1) in vec2 aUV;
+uniform mat4 uProj;
+uniform mat4 uView;
+uniform mat4 uModel;
+out vec2 vUV;
+void main() {
+  vUV = aUV;
+  gl_Position = uProj * uView * uModel * vec4(aPos, 0.0, 1.0);
+}
+</script>
+
+<script id="fs" type="x-shader/x-fragment">
+#version 300 es
+precision mediump float;
+in vec2 vUV;
+uniform sampler2D uTexture;
+out vec4 outColor;
+void main() {
+  outColor = texture(uTexture, vUV);
+}
+</script>
+
+<script>
+/* -------------------
+   CONFIGURACIÓN
+------------------- */
+const ANCHO_SPRITE=32, ALTO_SPRITE=32, ANCHO_SHEET=352, ALTO_SHEET=224;
+
+const SPRITE_PAC={col:1,fila:6};
+const SPRITE_FANTASMA_ROJO={col:0,fila:1};
+const SPRITE_FANTASMA_ROSA={col:1,fila:3};
+const SPRITE_FANTASMA_CIAN={col:3,fila:3};
+const SPRITE_FANTASMA_NARANJA={col:3,fila:3};
+const SPRITE_PASTILLA={col:9,fila:1};
+const SPRITE_FRUTA={col:8,fila:9};
+const SPRITE_PARED={col:8,fila:6};
+
+const COLUMNAS=20, FILAS=15;
+
+/* -------------------
+   MATRICES
+------------------- */
+function identidad() {
+    return new Float32Array([
+        1,0,0,0,
+        0,1,0,0,
+        0,0,1,0,
+        0,0,0,1
+    ]);
+}
+
+function ortho(left, right, bottom, top, near, far) {
+    const m = new Float32Array(16);
+    m[0] = 2 / (right - left);  m[5] = 2 / (top - bottom);  m[10] = -2 / (far - near);
+    m[12] = -(right + left) / (right - left);
+    m[13] = -(top + bottom) / (top - bottom);
+    m[14] = -(far + near) / (far - near);
+    m[15] = 1;
+    return m;
+}
+
+function multiplicar(out, a, b) {
+    const r = new Float32Array(16);
+    for(let i=0;i<4;i++){
+        for(let j=0;j<4;j++){
+            let s=0;
+            for(let k=0;k<4;k++){
+                s += a[i+k*4]*b[k+j*4];
+            }
+            r[i+j*4]=s;
+        }
+    }
+    out.set(r);
+}
+
+function trasladar(m, tx, ty, tz=0) {
+    const T = identidad();
+    T[12] = tx;
+    T[13] = ty;
+    T[14] = tz;
+    multiplicar(m, m, T);
+}
+
+function escalar(m, sx, sy, sz=1) {
+    const S = identidad();
+    S[0] = sx;
+    S[5] = sy;
+    S[10] = sz;
+    multiplicar(m, m, S);
+}
+
+/* -------------------
+   COLISIÓN RR
+------------------- */
+function colisionRR(ax, ay, aw, ah, bx, by, bw, bh) {
+    return ax < bx + bw &&
+           ax + aw > bx &&
+           ay < by + bh &&
+           ay + ah > by;
+}
+
+/* -------------------
+   WEBGL SHADERS
+------------------- */
+function crearShader(gl, tipo, src) {
+    const sh = gl.createShader(tipo);
+    gl.shaderSource(sh, src.trim());
+    gl.compileShader(sh);
+
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) {
+        console.error(gl.getShaderInfoLog(sh));
+    }
+
+    return sh;
+}
+
+/* -------------------
+   SPRITESHEET
+------------------- */
+class SpriteSheet {
+    constructor(gl, url, sheetW, sheetH) {
+        this.gl = gl;
+        this.sheetW = sheetW;
+        this.sheetH = sheetH;
+        this.tex = gl.createTexture();
+
+        const img = new Image();
+        img.src = url;
+        img.onload = () => { 
+            gl.bindTexture(gl.TEXTURE_2D, this.tex);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, img);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+            gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+            gl.generateMipmap(gl.TEXTURE_2D);
+        };
+
+        // Configuración VAO y buffers
+        this.vao = gl.createVertexArray();
+        gl.bindVertexArray(this.vao);
+
+        const posBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, posBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 1, 1, 0, 1]), gl.STATIC_DRAW);
+        gl.enableVertexAttribArray(0);
+        gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+        this.uvBuf = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuf);
+        gl.enableVertexAttribArray(1);
+        gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+        gl.bindVertexArray(null);
+        gl.bindBuffer(gl.ARRAY_BUFFER, null);
+    }
+
+    dibujarRegion(x, y, w, h, xpx, ypx, wpx, hpx, uModelLoc, uTexLoc) {
+        const gl = this.gl;
+
+        const u0 = xpx / this.sheetW;
+        const v0 = ypx / this.sheetH;
+        const u1 = (xpx + wpx) / this.sheetW;
+        const v1 = (ypx + hpx) / this.sheetH;
+
+        const uv = new Float32Array([u0, v1, u1, v1, u1, v0, u0, v0]);
+
+        // Cargar UVs y textura
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.uvBuf);
+        gl.bufferData(gl.ARRAY_BUFFER, uv, gl.DYNAMIC_DRAW);
+
+        gl.activeTexture(gl.TEXTURE0);
+        gl.bindTexture(gl.TEXTURE_2D, this.tex);
+        gl.uniform1i(uTexLoc, 0);
+
+        // Matriz modelo
+        const modelo = identidad();      // Crear identidad
+        trasladar(modelo, x, y);         // Traslación
+        escalar(modelo, w, h);           // Escalado
+        gl.uniformMatrix4fv(uModelLoc, false, modelo);
+
+        // Dibujar
+        gl.bindVertexArray(this.vao);
+        gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+        gl.bindVertexArray(null);
+    }
+}
+
+/* -------------------
+   ENTIDADES
+------------------- */
+// Variables globales
+let gl, canvas, programa, uProjLoc, uViewLoc, uModelLoc, uTexLoc, sheet;
+let muros = [], pastillas = [], fantasmas = [], pacman, fruta;
+
+// -------------------
+// Clase Muro
+// -------------------
+class Muro {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.w = 1;
+        this.h = 1;
+    }
+
+    dibujar() {
+        sheet.dibujarRegion(
+            this.x,
+            this.y,
+            this.w,
+            this.h,
+            SPRITE_PARED.col * ANCHO_SPRITE,
+            SPRITE_PARED.fila * ALTO_SPRITE,
+            ANCHO_SPRITE,
+            ALTO_SPRITE,
+            uModelLoc,
+            uTexLoc
+        );
+    }
+}
+
+// -------------------
+// Clase Pastilla
+// -------------------
+class Pastilla {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.w = 0.35;
+        this.h = 0.35;
+        this.activa = true;
+    }
+
+    dibujar() {
+        if (this.activa) {
+            sheet.dibujarRegion(
+                this.x + 0.325,
+                this.y + 0.325,
+                this.w,
+                this.h,
+                SPRITE_PASTILLA.col * ANCHO_SPRITE,
+                SPRITE_PASTILLA.fila * ALTO_SPRITE,
+                ANCHO_SPRITE,
+                ALTO_SPRITE,
+                uModelLoc,
+                uTexLoc
+            );
+        }
+    }
+}
+
+// -------------------
+// Clase Fruta
+// -------------------
+class Fruta {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.w = 0.9;
+        this.h = 0.9;
+        this.activa = true;
+    }
+
+    dibujar() {
+        if (this.activa) {
+            sheet.dibujarRegion(
+                this.x,
+                this.y,
+                this.w,
+                this.h,
+                SPRITE_FRUTA.col * ANCHO_SPRITE,
+                SPRITE_FRUTA.fila * ALTO_SPRITE,
+                ANCHO_SPRITE,
+                ALTO_SPRITE,
+                uModelLoc,
+                uTexLoc
+            );
+        }
+    }
+}
+
+// -------------------
+// Clase Pac-Man
+// -------------------
+class Pac {
+    constructor(x, y) {
+        this.x = x;
+        this.y = y;
+        this.w = 0.9;
+        this.h = 0.9;
+        this.vx = 0;
+        this.vy = 0;
+        this.vel = 4;
+        this.poder = false;
+        this.vivo = true;
+    }
+
+    dibujar() {
+        sheet.dibujarRegion(
+            this.x,
+            this.y,
+            this.w,
+            this.h,
+            SPRITE_PAC.col * ANCHO_SPRITE,
+            SPRITE_PAC.fila * ALTO_SPRITE,
+            ANCHO_SPRITE,
+            ALTO_SPRITE,
+            uModelLoc,
+            uTexLoc
+        );
+    }
+
+    intentarMover(dx, dy, muros, dt) {
+        const nx = this.x + dx * this.vel * dt;
+        const ny = this.y + dy * this.vel * dt;
+
+        for (const m of muros) {
+            if (colisionRR(nx, ny, this.w, this.h, m.x, m.y, m.w, m.h)) {
+                return false;
+            }
+        }
+
+        this.x = nx;
+        this.y = ny;
+        return true;
+    }
+}
+
+// -------------------
+// Clase Fantasma
+// -------------------
+class Fantasma {
+    constructor(x, y, sprite) {
+        this.x = x;
+        this.y = y;
+        this.w = 0.9;
+        this.h = 0.9;
+        this.vx = 0;
+        this.vy = 0;
+        this.vel = 2;
+        this.vivo = true;
+        this.sprite = sprite;
+    }
+
+    dibujar() {
+        if (!this.vivo) return;
+
+        sheet.dibujarRegion(
+            this.x,
+            this.y,
+            this.w,
+            this.h,
+            this.sprite.col * ANCHO_SPRITE,
+            this.sprite.fila * ALTO_SPRITE,
+            ANCHO_SPRITE,
+            ALTO_SPRITE,
+            uModelLoc,
+            uTexLoc
+        );
+    }
+
+    actualizar(muros, dt) {
+        if (!this.vivo) return;
+
+        // Elegir dirección aleatoria si está detenido
+        if (Math.abs(this.vx) < 1e-6 && Math.abs(this.vy) < 1e-6) {
+            const dirs = [[1,0], [-1,0], [0,1], [0,-1]];
+            const d = dirs[Math.floor(Math.random() * dirs.length)];
+            this.vx = d[0] * this.vel;
+            this.vy = d[1] * this.vel;
+        }
+
+        const nx = this.x + this.vx * dt;
+        const ny = this.y + this.vy * dt;
+
+        // Colisión con muros
+        for (const m of muros) {
+            if (colisionRR(nx, ny, this.w, this.h, m.x, m.y, m.w, m.h)) {
+                this.vx = 0;
+                this.vy = 0;
+                return;
+            }
+        }
+
+        this.x = nx;
+        this.y = ny;
+
+        // Cambiar dirección aleatoriamente
+        if (Math.random() < 0.008) {
+            this.vx = 0;
+            this.vy = 0;
+        }
+    }
+}
+
+/* -------------------
+   NIVEL
+------------------- */
+function crearNivel() {
+    // Reiniciar arrays
+    muros = [];
+    pastillas = [];
+    fantasmas = [];
+
+    // Bordes del mapa
+    for (let r = 0; r < FILAS; r++) {
+        muros.push(new Muro(0, r));           // Columna izquierda
+        muros.push(new Muro(COLUMNAS - 1, r)); // Columna derecha
+    }
+    for (let c = 0; c < COLUMNAS; c++) {
+        muros.push(new Muro(c, 0));           // Fila superior
+        muros.push(new Muro(c, FILAS - 1));   // Fila inferior
+    }
+
+    // Obstáculos internos
+    const obst = [
+    [2,2],[2,3],[2,4],[2,5],[4,4],[5,4],[6,4],[7,4],
+    [10,10],[10,11],[11,10],[11,11],[6,14],[7,14],[8,14],
+    [3,12],[3,13],[4,12],[4,13],[5,7],[5,8],[5,9],
+    [8,2],[9,2],[12,5],[12,6],[12,7],[10,16],[11,16]
+    ];
+
+
+    obst.forEach(p => muros.push(new Muro(p[1], p[0])));
+
+    // Pastillas
+    const posPastillas = [
+        [1, 1],
+        [13, 5],
+        [7, 10],
+        [2, 7],
+        [12, 3]
+    ];
+    posPastillas.forEach(p => pastillas.push(new Pastilla(p[1], p[0])));
+
+    // Fruta
+    fruta = new Fruta(5, 5);
+
+    // Pac-Man
+    pacman = new Pac(1, 1);
+
+    // Fantasmas
+    fantasmas = [
+        new Fantasma(1, 13, SPRITE_FANTASMA_ROJO),
+        new Fantasma(13, 1, SPRITE_FANTASMA_ROSA),
+        new Fantasma(13, 13, SPRITE_FANTASMA_CIAN),
+        new Fantasma(7, 10, SPRITE_FANTASMA_NARANJA)
+    ];
+}
+
+/* -------------------
+   MAIN
+------------------- */
+function main(){
+  canvas=document.getElementById('glcanvas'); gl=canvas.getContext('webgl2');
+  if(!gl){ alert('WebGL2 no soportado'); return; }
+  const vs=crearShader(gl,gl.VERTEX_SHADER,document.getElementById('vs').textContent);
+  const fs=crearShader(gl,gl.FRAGMENT_SHADER,document.getElementById('fs').textContent);
+  programa=gl.createProgram(); gl.attachShader(programa,vs); gl.attachShader(programa,fs); gl.linkProgram(programa); gl.useProgram(programa);
+
+  uProjLoc=gl.getUniformLocation(programa,'uProj'); uViewLoc=gl.getUniformLocation(programa,'uView'); 
+  uModelLoc=gl.getUniformLocation(programa,'uModel'); uTexLoc=gl.getUniformLocation(programa,'uTexture');
+
+  const proj=ortho(0,COLUMNAS,FILAS,0,-1,1);
+  gl.viewport(0,0,canvas.width,canvas.height);
+  gl.clearColor(0,0,0,1);
+  gl.uniformMatrix4fv(uProjLoc,false,proj);
+  gl.uniformMatrix4fv(uViewLoc,false,identidad());
+
+  sheet=new SpriteSheet(gl,'imag/spritesheet_nopink.png',ANCHO_SHEET,ALTO_SHEET);
+  crearNivel();
+
+  const teclas={ArrowUp:false,ArrowDown:false,ArrowLeft:false,ArrowRight:false};
+  window.addEventListener('keydown',(e)=>{ if(teclas.hasOwnProperty(e.key)) teclas[e.key]=true; });
+  window.addEventListener('keyup',(e)=>{ if(teclas.hasOwnProperty(e.key)) teclas[e.key]=false; });
+  document.getElementById('reiniciar').addEventListener('click',()=>{ crearNivel(); gameOver=false; });
+
+  let last=performance.now(), gameOver=false;
+
+  function actualizar(dt){
+    let dx=0, dy=0;
+    if(teclas.ArrowLeft) dx=-1;
+    if(teclas.ArrowRight) dx=1;
+    if(teclas.ArrowUp) dy=-1;
+    if(teclas.ArrowDown) dy=1;
+    if(dx!==0 && dy!==0){ dx*=0.7071; dy*=0.7071; }
+
+    pacman.intentarMover(dx,dy,muros,dt);
+    for(const f of fantasmas) f.actualizar(muros,dt);
+
+    for(const p of pastillas){ 
+        if(p.activa && colisionRR(pacman.x,pacman.y,pacman.w,pacman.h,p.x,p.y,p.w,p.h)) p.activa=false; }
+    if(fruta.activa && colisionRR(pacman.x,pacman.y,pacman.w,pacman.h,fruta.x,fruta.y,fruta.w,fruta.h)){
+      fruta.activa=false; pacman.poder=true;
+      for(const f of fantasmas) f.sprite={col:5,fila:4};
+      setTimeout(()=>{ pacman.poder=false; 
+        fantasmas[0].sprite=SPRITE_FANTASMA_ROJO; 
+        fantasmas[1].sprite=SPRITE_FANTASMA_ROSA; 
+        fantasmas[2].sprite=SPRITE_FANTASMA_CIAN; 
+        fantasmas[3].sprite=SPRITE_FANTASMA_NARANJA; },30000);
+    }
+
+    for(const f of fantasmas){
+      if(!f.vivo) continue;
+      if(colisionRR(pacman.x,pacman.y,pacman.w,pacman.h,f.x,f.y,f.w,f.h)){
+        if(pacman.poder) f.vivo=false;
+        else { pacman.vivo=false; gameOver=true; }
+      }
+    }
+
+    if(pastillas.every(p=>!p.activa) && fantasmas.every(f=>!f.vivo) && !gameOver){ 
+        gameOver=true; setTimeout(()=>alert("¡Ganaste!"),100); }
+  }
+
+  function renderizar(){ 
+    gl.clear(gl.COLOR_BUFFER_BIT); 
+    for(const m of muros) m.dibujar(); 
+    for(const p of pastillas) p.dibujar(); 
+    fruta.dibujar(); 
+    for(const f of fantasmas) f.dibujar(); 
+    if(pacman.vivo) pacman.dibujar(); }
+
+  function loop(now){ const dt=Math.min(0.05,(now-last)/1000.0); 
+    last=now; if(!gameOver){ 
+        actualizar(dt); 
+        renderizar(); 
+        requestAnimationFrame(loop); 
+    } 
+  }
+  requestAnimationFrame(loop);
+}
+
+window.onload=main;
+</script>
+</body>
+</html>
