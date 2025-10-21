@@ -196,9 +196,9 @@ class SpriteSheet {
         gl.uniform1i(uTexLoc, 0);
 
         // Matriz modelo
-        const modelo = identidad();      // Crear identidad
-        trasladar(modelo, x, y);         // Traslación
-        escalar(modelo, w, h);           // Escalado
+        const modelo = identidad();      
+        trasladar(modelo, x, y);         
+        escalar(modelo, w, h);           
         gl.uniformMatrix4fv(uMatrizModeloLoc, false, modelo);
 
         // Dibujar
@@ -492,6 +492,8 @@ function main(){
 
   const proj=ortho(0,COLUMNAS,FILAS,0,-1,1);
   gl.viewport(0,0,canvas.width,canvas.height);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.clearColor(0,0,0,1);
   gl.uniformMatrix4fv(uMatrizProyeccionLoc,false,proj);
   gl.uniformMatrix4fv(uMatrizVistaLoc,false,identidad());
