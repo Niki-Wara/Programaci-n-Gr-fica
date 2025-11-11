@@ -1,0 +1,394 @@
+<!DOCTYPE HTML>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<title>Laboratorio WebGL 2.0 - Bandada de Pájaros</title>
+<style>
+  html, body {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    border: 0;
+    overflow: hidden;
+    background: #000;
+    color: #fff;
+  }
+
+  #webglcanvas {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+  }
+</style>
+</head>
+<body>
+<canvas id="webglcanvas"></canvas>
+
+<!-- Fondos -->
+<img id="img_fondo1" src="fondo1.png" hidden>
+<img id="img_fondo2" src="fondo2.png" hidden>
+<img id="img_fondo3" src="fondo3.png" hidden>
+<img id="img_fondo4" src="fondo4.png" hidden>
+
+<!-- Pájaros -->
+<img id="img_pajaro1" src="pajaro1.png" hidden>
+<img id="img_pajaro2" src="pajaro2.png" hidden>
+<img id="img_pajaro3" src="pajaro3.png" hidden>
+
+<script id="vs" type="vertex">
+#version 300 es
+precision mediump float;
+
+uniform mat4 uMatrizProyeccion;
+uniform mat4 uMatrizVista;
+uniform mat4 uMatrizModelo;
+uniform mat4 uMatrizTextura;
+
+layout(location = 0) in vec2 aVertices;
+layout(location = 1) in vec2 aCoordenadasDeTextura;
+
+out vec2 vCoordenadasDeTextura;
+
+void main() {
+  vCoordenadasDeTextura = (uMatrizTextura * vec4(aCoordenadasDeTextura, 0.0, 1.0)).xy;
+  gl_Position = uMatrizProyeccion * uMatrizVista * uMatrizModelo * vec4(aVertices, 0.0, 1.0);
+}
+</script>
+
+<script id="fs" type="fragment">
+#version 300 es
+precision mediump float;
+
+uniform sampler2D uUnidadDeTextura;
+in vec2 vCoordenadasDeTextura;
+out vec4 color;
+
+void main() {
+  color = texture(uUnidadDeTextura, vCoordenadasDeTextura);
+}
+</script>
+
+<script>
+"use strict";
+
+// ---------------- Funciones de matrices ----------------
+function identidad(matriz) {
+  matriz[0]=1; matriz[4]=0; matriz[8]=0; matriz[12]=0;
+  matriz[1]=0; matriz[5]=1; matriz[9]=0; matriz[13]=0;
+  matriz[2]=0; matriz[6]=0; matriz[10]=1; matriz[14]=0;
+  matriz[3]=0; matriz[7]=0; matriz[11]=0; matriz[15]=1;
+}
+
+function traslacion(matriz, tx, ty, tz) {
+  let r = new Array(16);
+  r[0]=1; r[4]=0; r[8]=0; r[12]=tx;
+  r[1]=0; r[5]=1; r[9]=0; r[13]=ty;
+  r[2]=0; r[6]=0; r[10]=1; r[14]=tz;
+  r[3]=0; r[7]=0; r[11]=0; r[15]=1;
+  multiplica(matriz, matriz, r);
+}
+
+function escalacion(matriz, sx, sy, sz) {
+  let r = new Array(16);
+  r[0]=sx; r[4]=0; r[8]=0; r[12]=0;
+  r[1]=0; r[5]=sy; r[9]=0; r[13]=0;
+  r[2]=0; r[6]=0; r[10]=sz; r[14]=0;
+  r[3]=0; r[7]=0; r[11]=0; r[15]=1;
+  multiplica(matriz, matriz, r);
+}
+
+function ortho(matriz, izq, der, abj, arr, cerca, lejos) {
+  matriz[0] = 2 / (der - izq); matriz[4] = 0; matriz[8] = 0; matriz[12] = -(der + izq) / (der - izq);
+  matriz[1] = 0; matriz[5] = 2 / (arr - abj); matriz[9] = 0; matriz[13] = -(arr + abj) / (arr - abj);
+  matriz[2] = 0; matriz[6] = 0; matriz[10] = -2 / (lejos - cerca); matriz[14] = -(lejos + cerca) / (lejos - cerca);
+  matriz[3] = 0; matriz[7] = 0; matriz[11] = 0; matriz[15] = 1;
+}
+
+function multiplica(c, a, b) {
+  let r = new Array(16);
+  for (let i=0; i<4; i++) {
+    for (let j=0; j<4; j++) {
+      let suma = 0;
+      for (let k=0; k<4; k++) {
+        suma += a[i + k*4] * b[k + j*4];
+      }
+      r[i + j*4] = suma;
+    }
+  }
+  for (let i=0; i<16; i++) c[i] = r[i];
+}
+
+// ---------------- Variables globales ----------------
+let gl;
+let programa;
+let uMatrizProyeccion, uMatrizVista, uMatrizModelo, uUnidadDeTextura, uMatrizTextura;
+let rectanguloVAO;
+let listaTexturas = [];
+
+let MatrizProyeccion = new Float32Array(16);
+let MatrizVista = new Float32Array(16);
+let MatrizModelo = new Float32Array(16);
+let MatrizTextura = new Float32Array(16);
+
+let mundoIzq, mundoDer, mundoAbj = -5, mundoArr = 5;
+let tiempoAnterior = Date.now();
+let desplazamientosScroll = [0,0,0,0];
+
+const velocidadesScroll = [0.0002, 0.0006, 0.0012, 0.0020];
+const anchoFondo = 576, altoFondo = 324;
+
+// ---------------- Pájaros ----------------
+const tamanioPajaro = [
+  { w:1500, h:1600 },
+  { w:1500, h:1600 },
+  { w:1200, h:1280 }
+];
+
+const escalaBasePajaro = [0.1, 0.1, 0.12];
+
+// Crear bandada de 10 pájaros
+const bandada = [];
+for (let i=0; i<10; i++) {
+  const texIndex = 4 + Math.floor(Math.random()*3); // texturas 4,5,6
+  const posY = Math.random()*8 - 4; // altura -4 a 4
+  const velocidad = 0.015 + Math.random()*0.01;
+  bandada.push({
+    tex: texIndex,
+    x: Math.random()*20 - 10,
+    y: posY,
+    velocidad: velocidad,
+    frame: 0,
+    frameTimer: 0,
+    duracionFrame: 0.10 + Math.random()*0.05
+  });
+}
+
+// ---------------- Shaders ----------------
+function crearProgramaShaders() {
+  const vsTexto = document.getElementById("vs").text.trim();
+  const fsTexto = document.getElementById("fs").text.trim();
+
+  const vs = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vs, vsTexto);
+  gl.compileShader(vs);
+
+  const fs = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fs, fsTexto);
+  gl.compileShader(fs);
+
+  programa = gl.createProgram();
+  gl.attachShader(programa, vs);
+  gl.attachShader(programa, fs);
+  gl.linkProgram(programa);
+  gl.useProgram(programa);
+
+  uMatrizProyeccion = gl.getUniformLocation(programa, "uMatrizProyeccion");
+  uMatrizVista = gl.getUniformLocation(programa, "uMatrizVista");
+  uMatrizModelo = gl.getUniformLocation(programa, "uMatrizModelo");
+  uUnidadDeTextura = gl.getUniformLocation(programa, "uUnidadDeTextura");
+  uMatrizTextura = gl.getUniformLocation(programa, "uMatrizTextura");
+}
+
+// ---------------- Geometría ----------------
+function crearGeometria() {
+  rectanguloVAO = gl.createVertexArray();
+  gl.bindVertexArray(rectanguloVAO);
+
+  const vboPos = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboPos);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(8), gl.DYNAMIC_DRAW);
+  gl.enableVertexAttribArray(0);
+  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+
+  const coordTextura = new Float32Array([0,0,1,0,1,1,0,1]);
+  const vboUV = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, vboUV);
+  gl.bufferData(gl.ARRAY_BUFFER, coordTextura, gl.STATIC_DRAW);
+  gl.enableVertexAttribArray(1);
+  gl.vertexAttribPointer(1, 2, gl.FLOAT, false, 0, 0);
+
+  gl.bindVertexArray(null);
+  gl.bindBuffer(gl.ARRAY_BUFFER, null);
+  rectanguloVAO._vboPos = vboPos;
+}
+
+function actualizarVertices() {
+  const vertices = new Float32Array([
+    mundoIzq, mundoAbj,
+    mundoDer, mundoAbj,
+    mundoDer, mundoArr,
+    mundoIzq, mundoArr
+  ]);
+  gl.bindBuffer(gl.ARRAY_BUFFER, rectanguloVAO._vboPos);
+  gl.bufferData(gl.ARRAY_BUFFER, vertices, gl.DYNAMIC_DRAW);
+  gl.bindBuffer(gl.ARRAY_BUFFER, null);
+}
+
+// ---------------- Cargar Texturas ----------------
+function cargarTexturas(callback) {
+  const ids = ["img_fondo1","img_fondo2","img_fondo3","img_fondo4","img_pajaro1","img_pajaro2","img_pajaro3"];
+  let cargadas = 0;
+
+  for (let i=0; i<ids.length; i++) {
+    const imgEl = document.getElementById(ids[i]);
+    const tex = gl.createTexture();
+    listaTexturas.push(tex);
+
+    if (imgEl.complete && imgEl.naturalWidth !== 0) {
+      subirImagenATextura(imgEl, tex);
+      cargadas++;
+      if (cargadas === ids.length) callback();
+    } else {
+      imgEl.onload = () => { 
+        subirImagenATextura(imgEl, tex); 
+        cargadas++; 
+        if (cargadas === ids.length) callback(); 
+      };
+      imgEl.onerror = () => { alert("Error cargando "+ids[i]); };
+    }
+  }
+}
+
+function subirImagenATextura(imgEl, tex) {
+  gl.bindTexture(gl.TEXTURE_2D, tex);
+  gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, imgEl);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+  gl.bindTexture(gl.TEXTURE_2D, null);
+}
+
+// ---------------- Proyección ----------------
+function actualizarProyeccionYVertices(canvas) {
+  canvas.width = window.innerWidth;
+  canvas.height = window.innerHeight;
+  gl.viewport(0,0,canvas.width, canvas.height);
+
+  const aspect = canvas.width / canvas.height;
+  mundoIzq = -5*aspect;
+  mundoDer = 5*aspect;
+  mundoAbj = -5;
+  mundoArr = 5;
+
+  ortho(MatrizProyeccion, mundoIzq, mundoDer, mundoAbj, mundoArr, -5, 5);
+  gl.uniformMatrix4fv(uMatrizProyeccion, false, MatrizProyeccion);
+
+  identidad(MatrizVista);
+  gl.uniformMatrix4fv(uMatrizVista, false, MatrizVista);
+
+  actualizarVertices();
+}
+
+// ---------------- Dibujado ----------------
+function dibuja() {
+  const ahora = Date.now();
+  const dtMS = ahora - tiempoAnterior;
+  const dt = dtMS / 1000.0;
+  tiempoAnterior = ahora;
+
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.useProgram(programa);
+  gl.bindVertexArray(rectanguloVAO);
+
+  // Fondos
+  for (let capa=0; capa<4; capa++) {
+    desplazamientosScroll[capa] += velocidadesScroll[capa] * dtMS;
+    const uOffset = (desplazamientosScroll[capa] / anchoFondo) % 1.0;
+
+    identidad(MatrizModelo);
+    const repeatU = Math.max(1.0, Math.abs(mundoDer-mundoIzq) / ((anchoFondo/altoFondo)*Math.abs(mundoArr-mundoAbj)));
+
+    identidad(MatrizTextura);
+    const mt = new Array(16); identidad(mt); mt[0]=repeatU; mt[5]=1;
+    const tt = new Array(16); identidad(tt); tt[12]=uOffset;
+    multiplica(MatrizTextura, tt, mt);
+    gl.uniformMatrix4fv(uMatrizTextura, false, MatrizTextura);
+
+    gl.uniformMatrix4fv(uMatrizModelo, false, MatrizModelo);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, listaTexturas[capa]);
+    gl.uniform1i(uUnidadDeTextura, 0);
+
+    gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+  }
+
+  // Pájaros
+  const framesX = 2, framesY = 2, totalFrames = framesX * framesY;
+
+  for (let i=0; i<bandada.length; i++) {
+    const ave = bandada[i];
+    ave.x += ave.velocidad * dt * 60;
+    if (ave.x > mundoDer+2) ave.x = mundoIzq-2;
+
+    ave.frameTimer += dt;
+    if (ave.frameTimer >= ave.duracionFrame) {
+      ave.frame = (ave.frame+1) % totalFrames;
+      ave.frameTimer = 0;
+    }
+
+    identidad(MatrizModelo);
+    traslacion(MatrizModelo, ave.x, ave.y, 0);
+
+    const infoPix = tamanioPajaro[(ave.tex-4)];
+    const altoUnits = escalaBasePajaro[(ave.tex-4)] * (infoPix.h / 1600);
+    const anchoUnits = altoUnits * (infoPix.w / infoPix.h);
+    escalacion(MatrizModelo, anchoUnits, altoUnits, 1.0);
+
+    gl.uniformMatrix4fv(uMatrizModelo, false, MatrizModelo);
+
+    identidad(MatrizTextura);
+    const mt2 = new Array(16); identidad(mt2); mt2[0]=1/framesX; mt2[5]=1/framesY;
+
+    const col = ave.frame % framesX;
+    const row = Math.floor(ave.frame / framesX);
+    const tt2 = new Array(16); identidad(tt2);
+    tt2[12] = col/framesX;
+    tt2[13] = 1-(row+1)/framesY;
+    multiplica(MatrizTextura, tt2, mt2);
+    gl.uniformMatrix4fv(uMatrizTextura, false, MatrizTextura);
+
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, listaTexturas[ave.tex]);
+    gl.uniform1i(uUnidadDeTextura, 0);
+
+    gl.drawArrays(gl.TRIANGLE_FAN, 0, 4);
+  }
+
+  requestAnimationFrame(dibuja);
+}
+
+// ---------------- Main ----------------
+function main() {
+  const canvas = document.getElementById("webglcanvas");
+  gl = canvas.getContext("webgl2");
+  if (!gl) { alert("WebGL2 no disponible."); return; }
+
+  crearProgramaShaders();
+  crearGeometria();
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.clearColor(0, 0, 0, 1);
+
+  cargarTexturas(() => {
+    actualizarProyeccionYVertices(canvas);
+    tiempoAnterior = Date.now();
+    requestAnimationFrame(dibuja);
+  });
+
+  window.addEventListener("resize", () => {
+    actualizarProyeccionYVertices(canvas);
+  });
+}
+
+window.onload = main;
+
+</script>
+</body>
+</html>
