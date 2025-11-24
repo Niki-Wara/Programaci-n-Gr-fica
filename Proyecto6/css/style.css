@@ -1,0 +1,115 @@
+html,
+body {
+  font-family: "Poppins", Arial, sans-serif;
+  background-color: #000000; /* Rosa pastel muy suave */
+}
+
+/* --- SIDEBAR --- */
+#sidebar {
+  width: 260px;
+  height: 100vh;
+  position: fixed;
+  background: linear-gradient(180deg, #ffb7d5, #ffd7e9);
+  color: #4a004e;
+  padding: 20px;
+  border-right: 3px solid #ff8cc6;
+  box-shadow: 4px 0 10px rgba(255, 100, 180, 0.2);
+  border-radius: 0 20px 20px 0;
+}
+
+#sidebar h3,
+#sidebar h5 {
+  color: #4a004e;
+  font-weight: 700;
+  text-shadow: 1px 1px #fff;
+}
+
+/* Links del menú */
+#sidebar .nav-link {
+  color: #5c005c;
+  background-color: #ffe3f1;
+  margin-bottom: 8px;
+  border-radius: 12px;
+  transition: all 0.3s ease;
+  font-weight: 500;
+}
+
+#sidebar .nav-link:hover {
+  background-color: #ff9ecf;
+  color: white;
+  transform: translateX(5px);
+}
+
+/* Dropdown */
+#sidebar .dropdown-menu {
+  background-color: #ffeefd;
+  border: none;
+  padding: 5px 0;
+  border-radius: 12px;
+  box-shadow: 0 4px 8px rgba(255, 0, 140, 0.15);
+}
+
+#sidebar .dropdown-item {
+  color: #c80077;
+  padding: 10px 20px;
+  font-weight: 500;
+}
+
+#sidebar .dropdown-item:hover {
+  background-color: #ffcaec;
+  color: #770049;
+}
+
+/* --- BOTONES --- */
+#sidebar button,
+#sidebar .nav-link.bg-primary {
+  border-radius: 12px;
+  padding: 10px 14px;
+  font-weight: 600;
+  transition: all 0.3s ease;
+}
+
+/* Botón Reiniciar */
+#sidebar .bg-primary {
+  background-color: #caa8f5 !important;
+  color: #4a004e !important;
+}
+#sidebar .bg-primary:hover {
+  background-color: #b592f4 !important;
+  color: white !important;
+}
+
+/* Botón iniciar */
+#sidebar .btn-success {
+  background-color: #d6f5e3;
+  color: #004d2f;
+  border: none;
+}
+#sidebar .btn-success:hover {
+  background-color: #b6edcf;
+  transform: translateY(-2px);
+}
+
+/* Zoom */
+#sidebar .btn-secondary {
+  background-color: #c2e7ff;
+  color: #003a5c;
+}
+#sidebar .btn-secondary:hover {
+  background-color: #99d6ff;
+}
+
+/* Cambiar color */
+#sidebar .btn-warning {
+  background-color: #ffe0b2;
+  color: #8a5200;
+}
+#sidebar .btn-warning:hover {
+  background-color: #ffcd80;
+}
+
+/* --- CONTENIDO PRINCIPAL --- */
+#content {
+  margin-left: 280px;
+  padding: 20px;
+}
